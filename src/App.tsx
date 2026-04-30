@@ -601,7 +601,7 @@ export default function App() {
                       </button>
                       <button 
                         onClick={() => setActiveTab('history')} 
-                        className="bg-white border-2 border-gray-200 text-gray-800 px-8 py-4 font-bold uppercase tracking-widest hover:border-gray-500 hover:bg-gray-50 transition-all inline-flex items-center justify-center gap-3"
+                        className="bg-white border-2 border-gray-200 text-gray-800 px-8 py-4 font-bold uppercase tracking-widest hover:border-gray-500 hover:bg-gray-50 transition-all hover:shadow-lg hover:-translate-y-1 inline-flex items-center justify-center gap-3"
                       >
                         <History size={20} />
                         View History
@@ -612,31 +612,31 @@ export default function App() {
 
               {/* Interactive Bento Grid / Features */}
               <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white p-8 border border-gray-200 shadow-sm col-span-1 md:col-span-2 group hover:border-[#3FAF47] transition-colors relative overflow-hidden">
-                  <div className="absolute -right-10 -bottom-10 opacity-5 group-hover:scale-110 group-hover:opacity-10 text-[#3FAF47] transition-all duration-500">
+                <div className="bg-white p-8 border border-gray-200 shadow-sm col-span-1 md:col-span-2 group hover:border-[#3FAF47] hover:shadow-lg hover:-translate-y-1 transition-all duration-300 relative overflow-hidden cursor-pointer">
+                  <div className="absolute -right-10 -bottom-10 opacity-5 group-hover:scale-110 group-hover:opacity-10 text-[#3FAF47] transition-all duration-500 pointer-events-none">
                      <Shield size={220} strokeWidth={1} />
                   </div>
-                  <div className="w-12 h-12 bg-green-50 text-[#3FAF47] rounded-none flex items-center justify-center mb-6">
+                  <div className="w-12 h-12 bg-[#F0F8F1] text-[#3FAF47] border border-[#3FAF47]/20 rounded-none flex items-center justify-center mb-6 relative z-10 transition-colors group-hover:bg-[#3FAF47] group-hover:text-white">
                     <ShieldCheck size={28} />
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-3 relative z-10">Enterprise-Grade Accuracy</h3>
                   <p className="text-gray-600 leading-relaxed max-w-md relative z-10">Our models are trained on millions of confirmed botanical textbooks and agricultural datasets to give you confidence in every diagnosis.</p>
                 </div>
                 
-                <div className="bg-white p-8 border border-gray-200 shadow-sm group hover:border-[#7A4F2A] transition-colors relative overflow-hidden">
-                  <div className="absolute -right-6 -bottom-6 opacity-5 group-hover:scale-110 group-hover:opacity-10 text-[#7A4F2A] transition-all duration-500">
+                <div className="bg-white p-8 border border-gray-200 shadow-sm group hover:border-[#7A4F2A] hover:shadow-lg hover:-translate-y-1 transition-all duration-300 relative overflow-hidden cursor-pointer">
+                  <div className="absolute -right-6 -bottom-6 opacity-5 group-hover:scale-110 group-hover:opacity-10 text-[#7A4F2A] transition-all duration-500 pointer-events-none">
                      <Sparkles size={160} strokeWidth={1} />
                   </div>
-                  <div className="w-12 h-12 bg-yellow-50 text-[#7A4F2A] rounded-none flex items-center justify-center mb-6 relative z-10">
+                  <div className="w-12 h-12 bg-[#FFF8F0] text-[#7A4F2A] border border-[#7A4F2A]/20 rounded-none flex items-center justify-center mb-6 relative z-10 transition-colors group-hover:bg-[#7A4F2A] group-hover:text-white">
                     <Zap size={28} />
                   </div>
                   <h3 className="text-xl font-bold text-gray-900 mb-3 relative z-10">Instant Action</h3>
                   <p className="text-gray-600 leading-relaxed relative z-10">Stop guessing. Get detailed treatment blueprints immediately upon scan completion.</p>
                 </div>
 
-                <div className="bg-[#1a1a1a] text-white p-8 border border-gray-800 shadow-sm col-span-1 group relative overflow-hidden sm:min-h-[250px] flex flex-col justify-end">
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 opacity-50 blur-2xl rounded-full"></div>
-                  <div className="absolute -left-6 -top-6 text-gray-800 opacity-30 group-hover:rotate-12 transition-transform duration-700">
+                <div className="bg-[#1a1a1a] text-white p-8 border border-gray-800 shadow-sm col-span-1 group hover:border-gray-600 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 relative overflow-hidden sm:min-h-[250px] flex flex-col justify-end cursor-pointer">
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 opacity-50 blur-2xl rounded-full pointer-events-none"></div>
+                  <div className="absolute -left-6 -top-6 text-gray-800 opacity-30 group-hover:rotate-12 group-hover:scale-110 transition-all duration-700 pointer-events-none">
                      <Sprout size={120} strokeWidth={1} />
                   </div>
                   <h3 className="text-2xl font-bold mb-4 flex items-center gap-2 relative z-10">
@@ -645,9 +645,9 @@ export default function App() {
                   <p className="text-gray-400 relative z-10">Transform your farming outcomes with data-driven insights tailored to your specific region and soil profile.</p>
                 </div>
 
-                <div className="bg-white p-8 border border-gray-200 shadow-sm col-span-1 md:col-span-2 group hover:border-[#3FAF47] transition-colors overflow-hidden flex flex-col sm:flex-row items-center gap-8">
+                <div className="bg-white p-8 border border-gray-200 shadow-sm col-span-1 md:col-span-2 group hover:border-[#3FAF47] hover:shadow-lg hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col sm:flex-row items-center gap-8 cursor-pointer">
                    <div className="flex-1 relative z-10">
-                     <div className="w-12 h-12 bg-[#F0F8F1] text-[#3FAF47] rounded-none flex items-center justify-center mb-6">
+                     <div className="w-12 h-12 bg-[#F0F8F1] text-[#3FAF47] border border-[#3FAF47]/20 rounded-none flex items-center justify-center mb-6 transition-colors group-hover:bg-[#3FAF47] group-hover:text-white">
                         <History size={28} />
                      </div>
                      <h3 className="text-2xl font-bold text-gray-900 mb-3">Track Your Progress</h3>
