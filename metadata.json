@@ -1,0 +1,6 @@
+{
+  "name": "PerfectFarm",
+  "description": "AI Crop Disease Identifier & Treatment Advisor",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": []
+}
