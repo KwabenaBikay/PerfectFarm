@@ -1,13 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, Leaf, AlertTriangle, CheckCircle2, ShieldCheck, Activity, RefreshCcw, Sprout, Loader2, Camera, History, ChevronRight, Target, CloudRain, ThumbsUp, ThumbsDown, User, Download, Trash2, ArrowRight, Shield, Zap, Sparkles, Globe2, WifiOff, CalendarRange, MapPin } from 'lucide-react';
-import { analyzeCropImage, CropAnalysisResult, UserProfile } from './lib/ai';
+import { UploadCloud, Leaf, AlertTriangle, CheckCircle2, ShieldCheck, Activity, RefreshCcw, Sprout, Loader2, Camera, History, ChevronRight, Target, CloudRain, ThumbsUp, ThumbsDown, User, Download, Trash2, ArrowRight, Shield, Zap, Sparkles, Globe2, WifiOff, CalendarRange, MapPin, Share2, Thermometer, Wind, Droplet } from 'lucide-react';
+import { analyzeCropImage, MultiCropAnalysisResult, CropAnalysisResult, UserProfile, generateFarmAdvisory, FarmAdvisory } from './lib/ai';
 import { jsPDF } from 'jspdf';
 
 interface ScanHistoryItem {
   id: string;
   timestamp: number;
   imageBase64: string;
-  analysisResult: CropAnalysisResult;
+  analysisResult: MultiCropAnalysisResult;
 }
 
 export default function App() {
@@ -20,12 +20,15 @@ export default function App() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'analyzing' | 'success' | 'error'>('idle');
-  const [analysisResult, setAnalysisResult] = useState<CropAnalysisResult | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<MultiCropAnalysisResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(1);
+  const [farmAdvisory, setFarmAdvisory] = useState<FarmAdvisory | null>(null);
+  const [isGeneratingAdvisory, setIsGeneratingAdvisory] = useState(false);
+  const [advisoryError, setAdvisoryError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -88,7 +91,7 @@ export default function App() {
       }
   };
 
-  const saveToHistory = (dataUrl: string, result: CropAnalysisResult) => {
+  const saveToHistory = (dataUrl: string, result: MultiCropAnalysisResult) => {
     const newItem: ScanHistoryItem = {
         id: Date.now().toString(),
         timestamp: Date.now(),
@@ -160,8 +163,11 @@ export default function App() {
         const base64 = await fileToBase64(file);
         const result = await analyzeCropImage(base64, file.type, userProfile);
         
-        if (result.possible_disease === 'Invalid Image' || result.crop_detected === 'Unknown') {
-            setErrorMessage(result.detailed_explanation || 'No detectable plant was found in the image, or it was too blurry.');
+        if (!result || !result.results || result.results.length === 0) {
+            setErrorMessage('No detectable plant was found in the image, or it was too blurry.');
+            setStatus('error');
+        } else if (result.results[0].possible_disease === 'Invalid Image' || result.results[0].crop_detected === 'Unknown') {
+            setErrorMessage(result.results[0].detailed_explanation || 'No detectable plant was found in the image, or it was too blurry.');
             setStatus('error');
         } else {
             setAnalysisResult(result);
@@ -188,8 +194,47 @@ export default function App() {
     }
   };
 
+  const handleShare = async () => {
+    if (!analysisResult || !analysisResult.results || analysisResult.results.length === 0) return;
+    
+    const shareText = `I just analyzed my crop using PerfectFarm!\n\n${analysisResult.results.map((r, idx) => `Crop ${idx + 1}: ${r.crop_detected}\nDiagnosis: ${r.possible_disease}\nConfidence: ${r.confidence_score}`).join('\n\n')}\n\nSummary:\n${analysisResult.results[0].detailed_explanation.slice(0, 100)}...`;
+    
+    if (navigator.share) {
+        try {
+            await navigator.share({
+                title: 'PerfectFarm Analysis Report',
+                text: shareText,
+                url: window.location.href, // If hosted online
+            });
+        } catch (error) {
+            console.error('Error sharing:', error);
+        }
+    } else {
+        // Fallback to clipboard
+        try {
+            await navigator.clipboard.writeText(shareText);
+            alert('Analysis summary copied to clipboard!');
+        } catch (error) {
+            console.error('Error copying text:', error);
+        }
+    }
+  };
+
+  const handleGenerateAdvisory = async () => {
+    setIsGeneratingAdvisory(true);
+    setAdvisoryError(null);
+    try {
+        const response = await generateFarmAdvisory(userProfile);
+        setFarmAdvisory(response);
+    } catch (err: any) {
+        setAdvisoryError(err.message || "Failed to generate advisory");
+    } finally {
+        setIsGeneratingAdvisory(false);
+    }
+  };
+
   const downloadReport = async () => {
-    if (!analysisResult) return;
+    if (!analysisResult || !analysisResult.results || analysisResult.results.length === 0) return;
     
     let imgBase64 = '';
     if (imageFile) {
@@ -200,181 +245,187 @@ export default function App() {
 
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
-    const isHealthy = checkIsHealthy(analysisResult.possible_disease);
     
-    // Header Bar
-    doc.setFillColor(63, 175, 71); // #3FAF47
-    doc.rect(0, 0, pageWidth, 25, 'F');
-    
-    // Title
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    doc.setTextColor(255, 255, 255);
-    doc.text("PerfectFarm Analysis Report", 20, 17);
-    
-    // Date
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.setTextColor(200, 200, 200);
-    doc.text(new Date().toLocaleString(), pageWidth - 60, 17);
-    
-    // Summary Box
-    doc.setFillColor(245, 247, 245);
-    doc.setDrawColor(220, 225, 220);
-    doc.roundedRect(20, 35, pageWidth - 40, 65, 3, 3, 'FD');
-
-    // Image inside summary box
-    if (imgBase64) {
-        try {
-           doc.addImage(imgBase64, "JPEG", 25, 40, 55, 55);
-        } catch(e) {
-            console.error('Failed to add image to PDF', e);
-        }
-    }
-    
-    // Basic Details
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(40, 40, 40);
-    doc.text("Scan Summary", 90, 50);
-    
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "normal");
-    
-    doc.setTextColor(80, 80, 80);
-    doc.text("Crop Detected:", 90, 62);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(40, 40, 40);
-    doc.text(analysisResult.crop_detected, 130, 62);
-
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(80, 80, 80);
-    doc.text("Status:", 90, 72);
-    
-    // Status Badge
-    doc.setFont("helvetica", "bold");
-    if (isHealthy) {
-        doc.setTextColor(40, 140, 40);
-    } else {
-        doc.setTextColor(217, 56, 30);
-    }
-    doc.text(analysisResult.possible_disease, 130, 72);
-
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(80, 80, 80);
-    doc.text("Confidence:", 90, 82);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(40, 40, 40);
-    doc.text(String(analysisResult.confidence_score), 130, 82);
-    
-    let yPos = 115;
-    
-    const checkPageBreak = (neededSpace: number) => {
-        if (yPos + neededSpace > 280) {
+    analysisResult.results.forEach((result, idx) => {
+        if (idx > 0) {
             doc.addPage();
-            yPos = 20;
         }
-    };
-
-    // Helper for rendering section titles
-    const renderSectionTitle = (title: string, y: number) => {
-        doc.setFillColor(235, 240, 235);
-        doc.rect(20, y - 6, pageWidth - 40, 10, 'F');
-        doc.setFontSize(14);
+        const isHealthy = checkIsHealthy(result.possible_disease);
+        
+        // Header Bar
+        doc.setFillColor(63, 175, 71); // #3FAF47
+        doc.rect(0, 0, pageWidth, 25, 'F');
+        
+        // Title
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(50, 120, 50);
-        doc.text(title, 22, y + 1);
-        return y + 10;
-    };
+        doc.setFontSize(22);
+        doc.setTextColor(255, 255, 255);
+        doc.text(`PerfectFarm Analysis Report - Crop ${idx + 1}`, 20, 17);
+        
+        // Date
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(200, 200, 200);
+        doc.text(new Date().toLocaleString(), pageWidth - 60, 17);
+        
+        // Summary Box
+        doc.setFillColor(245, 247, 245);
+        doc.setDrawColor(220, 225, 220);
+        doc.roundedRect(20, 35, pageWidth - 40, 65, 3, 3, 'FD');
 
-    // Detailed Explanation
-    checkPageBreak(40);
-    yPos = renderSectionTitle("Detailed Explanation", yPos);
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(60, 60, 60);
-    const splitExplanation = doc.splitTextToSize(analysisResult.detailed_explanation, 170);
-    doc.text(splitExplanation, 20, yPos);
-    yPos += (splitExplanation.length * 5) + 10;
-
-    if (analysisResult.affected_areas_description) {
-        checkPageBreak(25);
-        doc.setFontSize(12);
+        // Image inside summary box
+        if (imgBase64) {
+            try {
+               doc.addImage(imgBase64, "JPEG", 25, 40, 55, 55);
+            } catch(e) {
+                console.error('Failed to add image to PDF', e);
+            }
+        }
+        
+        // Basic Details
+        doc.setFontSize(16);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(40, 40, 40);
-        doc.text("Affected Areas:", 20, yPos);
-        yPos += 6;
-        doc.setFontSize(11);
+        doc.text("Scan Summary", 90, 50);
+        
+        doc.setFontSize(12);
         doc.setFont("helvetica", "normal");
-        doc.setTextColor(60, 60, 60);
-        const lines = doc.splitTextToSize(analysisResult.affected_areas_description, 170);
-        doc.text(lines, 20, yPos);
-        yPos += lines.length * 5 + 8;
-    }
+        
+        doc.setTextColor(80, 80, 80);
+        doc.text("Crop Detected:", 90, 62);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(40, 40, 40);
+        doc.text(result.crop_detected, 130, 62);
 
-    if (analysisResult.symptoms_observed && analysisResult.symptoms_observed.length > 0) {
-        checkPageBreak(30);
-        yPos = renderSectionTitle("Symptoms Observed", yPos);
-        doc.setFontSize(11);
         doc.setFont("helvetica", "normal");
-        doc.setTextColor(60, 60, 60);
-        analysisResult.symptoms_observed.forEach(s => {
-            checkPageBreak(10);
-            const lines = doc.splitTextToSize(`• ${s}`, 170);
-            doc.text(lines, 20, yPos);
-            yPos += lines.length * 5 + 2;
-        });
-        yPos += 8;
-    }
-    
-    if (analysisResult.risk_assessment) {
-         checkPageBreak(50);
-         yPos = renderSectionTitle("Risk Assessment", yPos);
-         doc.setFontSize(11);
-         doc.setFont("helvetica", "normal");
-         doc.setTextColor(60, 60, 60);
-         const riskLines = [
-             `Severity: ${analysisResult.risk_assessment.severity}`,
-             `Spread Potential: ${analysisResult.risk_assessment.spread_potential}`,
-             `Estimated Yield Loss: ${analysisResult.risk_assessment.estimated_yield_loss}`
-         ];
-         riskLines.forEach(r => {
-             checkPageBreak(10);
-             const lines = doc.splitTextToSize(`• ${r}`, 170);
-             doc.text(lines, 20, yPos);
-             yPos += lines.length * 5 + 2;
-         });
-         yPos += 8;
-    }
+        doc.setTextColor(80, 80, 80);
+        doc.text("Status:", 90, 72);
+        
+        // Status Badge
+        doc.setFont("helvetica", "bold");
+        if (isHealthy) {
+            doc.setTextColor(40, 140, 40);
+        } else {
+            doc.setTextColor(217, 56, 30);
+        }
+        doc.text(result.possible_disease, 130, 72);
 
-    if (analysisResult.treatment_recommendations?.length) {
-        checkPageBreak(30);
-        yPos = renderSectionTitle("Treatment Recommendations", yPos);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(80, 80, 80);
+        doc.text("Confidence:", 90, 82);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(40, 40, 40);
+        doc.text(String(result.confidence_score), 130, 82);
+        
+        let yPos = 115;
+        
+        const checkPageBreak = (neededSpace: number) => {
+            if (yPos + neededSpace > 280) {
+                doc.addPage();
+                yPos = 20;
+            }
+        };
+
+        // Helper for rendering section titles
+        const renderSectionTitle = (title: string, y: number) => {
+            doc.setFillColor(235, 240, 235);
+            doc.rect(20, y - 6, pageWidth - 40, 10, 'F');
+            doc.setFontSize(14);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(50, 120, 50);
+            doc.text(title, 22, y + 1);
+            return y + 10;
+        };
+
+        // Detailed Explanation
+        checkPageBreak(40);
+        yPos = renderSectionTitle("Detailed Explanation", yPos);
         doc.setFontSize(11);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(60, 60, 60);
-        analysisResult.treatment_recommendations.forEach(r => {
-            checkPageBreak(10);
-            const lines = doc.splitTextToSize(`• ${r}`, 170);
+        const splitExplanation = doc.splitTextToSize(result.detailed_explanation, 170);
+        doc.text(splitExplanation, 20, yPos);
+        yPos += (splitExplanation.length * 5) + 10;
+
+        if (result.affected_areas_description) {
+            checkPageBreak(25);
+            doc.setFontSize(12);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(40, 40, 40);
+            doc.text("Affected Areas:", 20, yPos);
+            yPos += 6;
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(60, 60, 60);
+            const lines = doc.splitTextToSize(result.affected_areas_description, 170);
             doc.text(lines, 20, yPos);
-            yPos += lines.length * 5 + 2;
-        });
-        yPos += 8;
-    }
-    
-    if (analysisResult.preventive_measures?.length) {
-        checkPageBreak(30);
-        yPos = renderSectionTitle("Preventive Measures", yPos);
-        doc.setFontSize(11);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(60, 60, 60);
-        analysisResult.preventive_measures.forEach(p => {
-            checkPageBreak(10);
-            const lines = doc.splitTextToSize(`• ${p}`, 170);
-            doc.text(lines, 20, yPos);
-            yPos += lines.length * 5 + 2;
-        });
-    }
+            yPos += lines.length * 5 + 8;
+        }
+
+        if (result.symptoms_observed && result.symptoms_observed.length > 0) {
+            checkPageBreak(30);
+            yPos = renderSectionTitle("Symptoms Observed", yPos);
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(60, 60, 60);
+            result.symptoms_observed.forEach(s => {
+                checkPageBreak(10);
+                const lines = doc.splitTextToSize(`• ${s}`, 170);
+                doc.text(lines, 20, yPos);
+                yPos += lines.length * 5 + 2;
+            });
+            yPos += 8;
+        }
+        
+        if (result.risk_assessment) {
+             checkPageBreak(50);
+             yPos = renderSectionTitle("Risk Assessment", yPos);
+             doc.setFontSize(11);
+             doc.setFont("helvetica", "normal");
+             doc.setTextColor(60, 60, 60);
+             const riskLines = [
+                 `Severity: ${result.risk_assessment.severity}`,
+                 `Spread Potential: ${result.risk_assessment.spread_potential}`,
+                 `Estimated Yield Loss: ${result.risk_assessment.estimated_yield_loss}`
+             ];
+             riskLines.forEach(r => {
+                 checkPageBreak(10);
+                 const lines = doc.splitTextToSize(`• ${r}`, 170);
+                 doc.text(lines, 20, yPos);
+                 yPos += lines.length * 5 + 2;
+             });
+             yPos += 8;
+        }
+
+        if (result.treatment_recommendations?.length) {
+            checkPageBreak(30);
+            yPos = renderSectionTitle("Treatment Recommendations", yPos);
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(60, 60, 60);
+            result.treatment_recommendations.forEach(r => {
+                checkPageBreak(10);
+                const lines = doc.splitTextToSize(`• ${r}`, 170);
+                doc.text(lines, 20, yPos);
+                yPos += lines.length * 5 + 2;
+            });
+            yPos += 8;
+        }
+        
+        if (result.preventive_measures?.length) {
+            checkPageBreak(30);
+            yPos = renderSectionTitle("Preventive Measures", yPos);
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(60, 60, 60);
+            result.preventive_measures.forEach(p => {
+                checkPageBreak(10);
+                const lines = doc.splitTextToSize(`• ${p}`, 170);
+                doc.text(lines, 20, yPos);
+                yPos += lines.length * 5 + 2;
+            });
+        }
+    });
 
     doc.save(`PerfectFarm_Report_${Date.now()}.pdf`);
   };
@@ -410,7 +461,7 @@ export default function App() {
              lower.includes('no disease');
   };
 
-  const isHealthy = checkIsHealthy(analysisResult?.possible_disease);
+  const isHealthy = checkIsHealthy(analysisResult?.results?.[0]?.possible_disease);
 
   const deleteHistoryItem = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
@@ -481,7 +532,9 @@ export default function App() {
               </div>
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
                   {historyItems.map(item => {
-                      const isItemHealthy = checkIsHealthy(item.analysisResult.possible_disease);
+                      const firstResult = item.analysisResult.results?.[0];
+                      if (!firstResult) return null;
+                      const isItemHealthy = checkIsHealthy(firstResult.possible_disease);
                       return (
                       <div 
                          key={item.id} 
@@ -511,9 +564,9 @@ export default function App() {
                           </div>
                           <div className={`p-5 flex-1 flex flex-col ${isItemHealthy ? 'group-hover:bg-[#F0F8F1]' : 'group-hover:bg-[#FDEDEA]'} transition-colors`}>
                               <div className="text-[10px] text-gray-400 mb-2 font-bold uppercase tracking-wider">{new Date(item.timestamp).toLocaleDateString()} • {new Date(item.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                              <h4 className="font-bold text-gray-900 mb-1 text-lg">{item.analysisResult.crop_detected}</h4>
+                              <h4 className="font-bold text-gray-900 mb-1 text-lg">{firstResult.crop_detected}</h4>
                               <p className="text-sm font-medium text-gray-600 line-clamp-2 mb-4 flex-1">
-                                  {item.analysisResult.possible_disease}
+                                  {firstResult.possible_disease}
                               </p>
                               <div className={`text-xs font-bold uppercase tracking-widest flex items-center justify-between mt-auto ${isItemHealthy ? 'text-[#3FAF47]' : 'text-[#D9381E]'}`}>
                                   View Details <ChevronRight size={14} className="group-hover:translate-x-1 transition-transform" />
@@ -725,47 +778,125 @@ export default function App() {
                      <button onClick={() => setActiveTab('profile')} className="bg-[#3FAF47] text-white px-6 py-2.5 font-bold uppercase tracking-widest hover:bg-[#328C38] transition-colors">Setup Profile</button>
                  </div>
              ) : (
-                 <div className="grid md:grid-cols-2 gap-6">
-                     <div className="bg-white border border-gray-200 shadow-sm p-6">
-                         <h3 className="font-bold text-lg text-gray-900 mb-4 flex items-center gap-2"><MapPin size={18} className="text-[#3FAF47]"/> Predicted Climate for {userProfile.location}</h3>
-                         <div className="space-y-4">
-                             <div className="bg-blue-50 p-4 border border-blue-100 flex gap-4 items-start">
-                                 <CloudRain className="text-blue-500 shrink-0 mt-1" size={24} />
-                                 <div>
-                                     <h4 className="font-bold text-blue-900 text-sm uppercase tracking-wider mb-1">Expected Rainfall</h4>
-                                     <p className="text-blue-800 text-sm">Below average rainfall predicted for the next 4 weeks. Implement mulching to retain soil moisture.</p>
+                 <div className="space-y-6">
+                     <div className="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
+                        <div className="text-gray-600 font-medium">Location: <span className="text-gray-900 font-bold">{userProfile.location}</span> | Crops: <span className="text-gray-900 font-bold">{userProfile.primaryCrops}</span></div>
+                        <button 
+                            onClick={handleGenerateAdvisory}
+                            disabled={isGeneratingAdvisory}
+                            className="bg-[#3FAF47] text-white px-4 py-2 font-bold uppercase tracking-widest hover:bg-[#328C38] transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isGeneratingAdvisory ? <Loader2 size={16} className="animate-spin" /> : <RefreshCcw size={16} />}
+                            {farmAdvisory ? "Refresh Advisory" : "Generate Local Advisory"}
+                        </button>
+                     </div>
+
+                     {advisoryError && (
+                        <div className="bg-red-50 text-red-700 p-4 border border-red-200 mb-6 flex gap-3 items-start">
+                            <AlertTriangle size={20} className="shrink-0 mt-0.5" />
+                            <div>
+                                <h4 className="font-bold">Error generating advisory</h4>
+                                <p className="text-sm">{advisoryError}</p>
+                            </div>
+                        </div>
+                     )}
+
+                     {isGeneratingAdvisory && !farmAdvisory && (
+                         <div className="flex flex-col items-center justify-center py-20 text-center">
+                             <div className="relative">
+                                 <div className="w-16 h-16 border-4 border-gray-200 border-t-[#3FAF47] rounded-full animate-spin"></div>
+                                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[#3FAF47]">
+                                    <CloudRain size={20} />
                                  </div>
                              </div>
-                             <div className="bg-yellow-50 p-4 border border-yellow-100 flex gap-4 items-start">
-                                 <Activity className="text-yellow-600 shrink-0 mt-1" size={24} />
-                                 <div>
-                                     <h4 className="font-bold text-yellow-900 text-sm uppercase tracking-wider mb-1">Pest Alert</h4>
-                                     <p className="text-yellow-800 text-sm">High risk of Aphids due to expected dry and warm conditions. Prepare neem-oil based preventive sprays.</p>
+                             <h3 className="text-xl font-bold text-gray-900 mt-6 mb-2">Analyzing Local Weather...</h3>
+                             <p className="text-gray-500 max-w-sm mx-auto">Gathering climate data and adjusting protocols for {userProfile.location}...</p>
+                         </div>
+                     )}
+
+                     {farmAdvisory && !isGeneratingAdvisory && (
+                         <div className="space-y-8 fade-in">
+                             {/* Weather Summary Card */}
+                             <div className="bg-white border border-gray-200 shadow-sm p-6 lg:p-8">
+                                 <h3 className="font-bold text-xl text-gray-900 mb-6 flex items-center gap-2 border-b border-gray-100 pb-4">
+                                     <MapPin size={24} className="text-blue-500"/> Current Weather & Climate Info
+                                 </h3>
+                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                     <div className="bg-blue-50 p-4 border border-blue-100 rounded-sm">
+                                         <Thermometer className="text-blue-500 mb-2" size={24} />
+                                         <div className="text-[10px] font-bold uppercase tracking-wider text-blue-800/70 mb-1">Temperature</div>
+                                         <div className="font-bold text-blue-900 text-lg">{farmAdvisory.weatherData.temperature}</div>
+                                     </div>
+                                     <div className="bg-blue-50 p-4 border border-blue-100 rounded-sm">
+                                         <Droplet className="text-blue-500 mb-2" size={24} />
+                                         <div className="text-[10px] font-bold uppercase tracking-wider text-blue-800/70 mb-1">Humidity</div>
+                                         <div className="font-bold text-blue-900 text-lg">{farmAdvisory.weatherData.humidity}</div>
+                                     </div>
+                                     <div className="bg-blue-50 p-4 border border-blue-100 rounded-sm">
+                                         <Wind className="text-blue-500 mb-2" size={24} />
+                                         <div className="text-[10px] font-bold uppercase tracking-wider text-blue-800/70 mb-1">Wind Speed</div>
+                                         <div className="font-bold text-blue-900 text-lg">{farmAdvisory.weatherData.windSpeed}</div>
+                                     </div>
+                                     <div className="bg-blue-50 p-4 border border-blue-100 rounded-sm">
+                                         <CloudRain className="text-blue-500 mb-2" size={24} />
+                                         <div className="text-[10px] font-bold uppercase tracking-wider text-blue-800/70 mb-1">Rainfall History</div>
+                                         <div className="font-bold text-blue-900 text-xs sm:text-sm leading-tight">{farmAdvisory.weatherData.rainfallHistory}</div>
+                                     </div>
+                                 </div>
+                             </div>
+
+                             <div className="grid md:grid-cols-2 gap-8">
+                                 {/* Pest/Disease Warnings */}
+                                 <div className="bg-white border border-gray-200 shadow-sm p-6 lg:p-8 relative overflow-hidden">
+                                     <div className="absolute top-0 left-0 w-1.5 h-full bg-orange-500"></div>
+                                     <h3 className="font-bold text-lg text-gray-900 mb-6 flex items-center gap-2">
+                                         <Activity size={20} className="text-orange-500"/> Outbreak & Pest Warnings
+                                     </h3>
+                                     <div className="space-y-4">
+                                         {farmAdvisory.pestDiseaseWarnings.map((warning, idx) => (
+                                             <div key={idx} className="bg-orange-50 p-4 border border-orange-100 flex gap-4 items-start">
+                                                 <AlertTriangle className={warning.severity === 'High' ? 'text-red-500 shrink-0 mt-1' : 'text-orange-400 shrink-0 mt-1'} size={24} />
+                                                 <div>
+                                                     <div className="flex items-center gap-2 mb-1">
+                                                         <h4 className="font-bold text-orange-900 text-sm uppercase tracking-wider">{warning.title}</h4>
+                                                         <span className={`text-[9px] font-bold px-1.5 py-0.5 uppercase tracking-widest ${warning.severity === 'High' ? 'bg-red-500 text-white' : 'bg-orange-200 text-orange-800'}`}>
+                                                             {warning.severity}
+                                                         </span>
+                                                     </div>
+                                                     <p className="text-orange-800 text-sm leading-relaxed">{warning.description}</p>
+                                                 </div>
+                                             </div>
+                                         ))}
+                                     </div>
+                                 </div>
+
+                                 {/* Planting Recommendations */}
+                                 <div className="bg-white border border-gray-200 shadow-sm p-6 lg:p-8 relative overflow-hidden">
+                                     <div className="absolute top-0 left-0 w-1.5 h-full bg-[#3FAF47]"></div>
+                                     <h3 className="font-bold text-lg text-gray-900 mb-6 flex items-center gap-2">
+                                         <Leaf size={20} className="text-[#3FAF47]"/> Fine-tuned Planting Guide
+                                     </h3>
+                                     <ul className="space-y-4">
+                                         {farmAdvisory.plantingRecommendations.map((rec, idx) => (
+                                             <li key={idx} className="flex items-start gap-4">
+                                                 <div className="bg-green-100 text-green-800 p-2 font-bold text-xs shrink-0 whitespace-nowrap mt-0.5 text-center min-w-[70px]">
+                                                     {rec.title}
+                                                 </div>
+                                                 <p className="text-sm text-gray-700 font-medium leading-relaxed">{rec.action}</p>
+                                             </li>
+                                         ))}
+                                     </ul>
                                  </div>
                              </div>
                          </div>
-                     </div>
-                     <div className="bg-white border border-gray-200 shadow-sm p-6">
-                         <h3 className="font-bold text-lg text-gray-900 mb-4 flex items-center gap-2"><Leaf size={18} className="text-[#3FAF47]"/> Planting Guides: {userProfile.primaryCrops.split(',')[0]}</h3>
-                         <ul className="space-y-3">
-                             <li className="flex items-center gap-3">
-                                 <div className="bg-green-100 text-green-700 p-2 font-bold text-xs">WEEK 1</div>
-                                 <p className="text-sm text-gray-700 font-medium">Prepare soil and clear debris. Add organic compost.</p>
-                             </li>
-                             <li className="flex items-center gap-3">
-                                 <div className="bg-green-100 text-green-700 p-2 font-bold text-xs">WEEK 2</div>
-                                 <p className="text-sm text-gray-700 font-medium">Sow seeds in shaded nurseries if temperature exceeds 30°C.</p>
-                             </li>
-                             <li className="flex items-center gap-3">
-                                 <div className="bg-green-100 text-green-700 p-2 font-bold text-xs">WEEK 4</div>
-                                 <p className="text-sm text-gray-700 font-medium">Transplant during late evening to avoid heat stress.</p>
-                             </li>
-                             <li className="flex items-center gap-3">
-                                 <div className="bg-green-100 text-green-700 p-2 font-bold text-xs">WEEK 6</div>
-                                 <p className="text-sm text-gray-700 font-medium">Apply first round of balanced customized fertilizer.</p>
-                             </li>
-                         </ul>
-                     </div>
+                     )}
+                     
+                     {!farmAdvisory && !isGeneratingAdvisory && (
+                         <div className="bg-gray-50 border border-gray-200 border-dashed p-12 text-center text-gray-500">
+                             <Sprout size={48} className="mx-auto text-gray-300 mb-4" />
+                             <p>Tap "Generate Local Advisory" to get weather data and localized planting protocols.</p>
+                         </div>
+                     )}
                  </div>
              )}
           </div>
@@ -824,9 +955,13 @@ export default function App() {
                             onChange={(e) => setUserProfile({...userProfile, language: e.target.value})}
                         >
                             <option value="English">English</option>
-                            <option value="Swahili">Swahili</option>
-                            <option value="Zulu">Zulu</option>
-                            <option value="Shona">Shona</option>
+                            <option value="Twi">Twi</option>
+                            <option value="Ewe">Ewe</option>
+                            <option value="Ga">Ga</option>
+                            <option value="Dagbani">Dagbani</option>
+                            <option value="Hausa">Hausa</option>
+                            <option value="Fante">Fante</option>
+                            <option value="Nzema">Nzema</option>
                             <option value="French">French</option>
                             <option value="Portuguese">Portuguese</option>
                         </select>
@@ -914,38 +1049,45 @@ export default function App() {
            </div>
         )}
 
-        {status === 'success' && analysisResult && (
-          <div className="max-w-6xl mx-auto grid md:grid-cols-[1fr_2fr] gap-8 items-start">
+        {status === 'success' && analysisResult && analysisResult.results && (
+          <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-8 items-start">
              {/* Left Column: Image & Baseline Info */}
-             <div className="flex flex-col gap-6">
-                <div className="bg-white border border-gray-200 shadow-sm p-4">
+             <div className="flex flex-col gap-6 lg:w-1/3">
+                <div className="bg-white border border-gray-200 shadow-sm p-4 sticky top-6">
                     <div className="relative inline-block w-full">
                         <img src={imagePreviewUrl!} alt="Analyzed crop" className="w-full h-auto object-cover block" />
-                        {analysisResult.affected_bounding_box && analysisResult.affected_bounding_box.length === 4 && (
+                        {analysisResult.results.map((result, idx) => (
+                          result.affected_bounding_box && result.affected_bounding_box.length === 4 ? (
                             <div 
+                                key={`bbox-${idx}`}
                                 className="absolute border-2 border-red-500 bg-red-500/20 pointer-events-none transition-all duration-500"
                                 style={{
-                                    top: `${analysisResult.affected_bounding_box[0] / 10}%`,
-                                    left: `${analysisResult.affected_bounding_box[1] / 10}%`,
-                                    height: `${(analysisResult.affected_bounding_box[2] - analysisResult.affected_bounding_box[0]) / 10}%`,
-                                    width: `${(analysisResult.affected_bounding_box[3] - analysisResult.affected_bounding_box[1]) / 10}%`
+                                    top: `${result.affected_bounding_box[0] / 10}%`,
+                                    left: `${result.affected_bounding_box[1] / 10}%`,
+                                    height: `${(result.affected_bounding_box[2] - result.affected_bounding_box[0]) / 10}%`,
+                                    width: `${(result.affected_bounding_box[3] - result.affected_bounding_box[1]) / 10}%`
                                 }}
                             >
                                 <span className="absolute -top-6 left-[-2px] bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 whitespace-nowrap shadow-sm">
-                                    Affected Area
+                                    Crop {idx + 1}
                                 </span>
                             </div>
-                        )}
+                          ) : null
+                        ))}
                     </div>
                 </div>
+
                 <div className="bg-white border border-gray-200 shadow-sm p-6 relative overflow-hidden">
-                    {/* decorative background stripe */}
                     <div className="absolute top-0 left-0 w-2 h-full bg-[#3FAF47]"></div>
                     <div className="pl-4">
-                        <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-1">Crop Detected</h4>
-                        <p className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                           {analysisResult.crop_detected} <Sprout className="text-[#3FAF47]" size={24} />
-                        </p>
+                        <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Crops Detected</h4>
+                        <div className="flex flex-col gap-2">
+                           {analysisResult.results.map((r, i) => (
+                               <p key={`crop-${i}`} className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                                  {r.crop_detected} <Sprout className="text-[#3FAF47]" size={20} />
+                               </p>
+                           ))}
+                        </div>
                     </div>
                 </div>
 
@@ -957,183 +1099,199 @@ export default function App() {
                 </button>
              </div>
 
-             {/* Right Column: AI Analysis Output */}
-             <div className="flex flex-col gap-6">
-                 {/* Diagnosis Header */}
-                 <div className="bg-white border border-gray-200 shadow-sm p-8">
-                     <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6 pb-6 border-b border-gray-100">
-                         <div>
-                             <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Issue Detected</h4>
-                             <h2 className="text-4xl font-bold text-gray-900 leading-none">{analysisResult.possible_disease}</h2>
-                         </div>
-                         <div className="flex flex-wrap gap-3">
-                             <div 
-                                className="bg-gray-100 text-gray-800 border border-gray-200 px-4 py-2 text-sm font-bold flex items-center gap-2 cursor-help"
-                                title="This shows how certain the AI is about its diagnosis, not the severity of the disease."
-                             >
-                                <Activity size={16} className="text-blue-500" />
-                                AI Confidence: {analysisResult.confidence_score}
-                             </div>
-                             <button
-                                 onClick={downloadReport}
-                                 className="bg-white text-gray-800 hover:bg-gray-50 border border-gray-200 px-4 py-2 text-sm font-bold flex items-center gap-2 transition-colors cursor-pointer"
-                             >
-                                 <Download size={16} /> Report
-                             </button>
-                             {!isHealthy && (
-                                <div className="bg-red-50 text-red-700 border border-red-200 px-4 py-2 text-sm font-bold flex items-center gap-2 uppercase tracking-wide">
-                                    <AlertTriangle size={16} /> High Risk
-                                </div>
-                             )}
-                             {isHealthy && (
-                                <div className="bg-[#EAF5EC] text-[#3FAF47] border border-[#3FAF47] px-4 py-2 text-sm font-bold flex items-center gap-2 uppercase tracking-wide">
-                                    <CheckCircle2 size={16} /> Healthy
-                                </div>
-                             )}
-                         </div>
-                     </div>
+             {/* Right Column: AI Analysis Output for each crop */}
+             <div className="flex flex-col gap-10 lg:w-2/3">
+                 {/* Overall Document Actions */}
+                 <div className="flex justify-end gap-3 border-b border-gray-200 pb-4">
+                     <button
+                         onClick={downloadReport}
+                         className="bg-white text-gray-800 hover:bg-gray-50 border border-gray-200 px-4 py-2 text-sm font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
+                     >
+                         <Download size={16} /> Report
+                     </button>
+                     <button
+                         onClick={handleShare}
+                         className="bg-white text-gray-800 hover:bg-gray-50 border border-gray-200 px-4 py-2 text-sm font-bold flex items-center gap-2 transition-colors cursor-pointer shadow-sm"
+                     >
+                         <Share2 size={16} /> Share
+                     </button>
+                 </div>
 
-                     <div className="prose prose-gray max-w-none text-gray-700">
-                         <p className="text-lg leading-relaxed">{analysisResult.detailed_explanation}</p>
-                     </div>
-
-                     {!isHealthy && analysisResult.risk_assessment && (
-                         <div className="mt-6 border border-gray-200 p-4 bg-gray-50 flex flex-col sm:flex-row gap-6 relative overflow-hidden">
-                             {/* Decorative mark, color depends on severity */}
-                             <div className={`absolute top-0 left-0 w-2 h-full ${analysisResult.risk_assessment.severity.toLowerCase().includes('high') ? 'bg-[#D9381E]' : (analysisResult.risk_assessment.severity.toLowerCase().includes('low') ? 'bg-yellow-400' : 'bg-orange-500')}`}></div>
-                             
-                             <div className="flex-1 py-1 px-2">
-                                 <h4 className="text-sm font-bold uppercase tracking-widest text-[#7A4F2A] mb-4 flex items-center gap-2">
-                                     <Activity size={16} /> Risk Assessment
-                                 </h4>
-                                 
-                                 <div className="grid sm:grid-cols-3 gap-4">
-                                     <div className="bg-white p-3 border border-gray-200 shadow-sm">
-                                         <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Severity</span>
-                                         <span className={`font-bold text-lg ${analysisResult.risk_assessment.severity.toLowerCase().includes('high') ? 'text-red-600' : 'text-orange-600'}`}>
-                                            {analysisResult.risk_assessment.severity}
-                                         </span>
+                 {analysisResult.results.map((result, idx) => {
+                     const isHealthy = checkIsHealthy(result.possible_disease);
+                     return (
+                         <div key={`result-${idx}`} className="flex flex-col gap-6" id={`crop-result-${idx}`}>
+                             {/* Diagnosis Header */}
+                             <div className="bg-white border border-gray-200 shadow-sm p-8">
+                                 <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6 pb-6 border-b border-gray-100">
+                                     <div>
+                                         <h4 className="text-xs font-bold uppercase tracking-widest text-[#3FAF47] mb-2">Crop {idx + 1}: {result.crop_detected}</h4>
+                                         <h2 className="text-3xl font-bold text-gray-900 leading-tight">{result.possible_disease}</h2>
                                      </div>
-                                     <div className="bg-white p-3 border border-gray-200 shadow-sm">
-                                         <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Spread Potential</span>
-                                         <span className="font-semibold text-sm text-gray-800">
-                                            {analysisResult.risk_assessment.spread_potential}
-                                         </span>
-                                     </div>
-                                     <div className="bg-white p-3 border border-gray-200 shadow-sm">
-                                         <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Est. Yield Loss</span>
-                                         <span className="font-semibold text-sm text-gray-800">
-                                            {analysisResult.risk_assessment.estimated_yield_loss}
-                                         </span>
+                                     <div className="flex flex-wrap gap-3">
+                                         <div 
+                                            className="bg-gray-100 text-gray-800 border border-gray-200 px-4 py-2 text-sm font-bold flex items-center gap-2 cursor-help"
+                                            title="This shows how certain the AI is about its diagnosis, not the severity of the disease."
+                                         >
+                                            <Activity size={16} className="text-blue-500" />
+                                            Confidence: {result.confidence_score}
+                                         </div>
+                                         {!isHealthy && (
+                                            <div className="bg-red-50 text-red-700 border border-red-200 px-4 py-2 text-sm font-bold flex items-center gap-2 uppercase tracking-wide">
+                                                <AlertTriangle size={16} /> High Risk
+                                            </div>
+                                         )}
+                                         {isHealthy && (
+                                            <div className="bg-[#EAF5EC] text-[#3FAF47] border border-[#3FAF47] px-4 py-2 text-sm font-bold flex items-center gap-2 uppercase tracking-wide">
+                                                <CheckCircle2 size={16} /> Healthy
+                                            </div>
+                                         )}
                                      </div>
                                  </div>
-                             </div>
-                         </div>
-                     )}
 
-                     {((analysisResult.symptoms_observed && analysisResult.symptoms_observed.length > 0) || analysisResult.environmental_factors?.length || analysisResult.affected_areas_description) && !isHealthy && (
-                        <div className="mt-8 space-y-6">
-                             {analysisResult.symptoms_observed && analysisResult.symptoms_observed.length > 0 && (
-                                 <div>
-                                     <h4 className="text-sm font-bold uppercase tracking-widest text-[#7A4F2A] mb-4">Symptoms Observed</h4>
-                                     <ul className="grid sm:grid-cols-2 gap-3 text-sm font-medium">
-                                         {analysisResult.symptoms_observed.map((symptom, i) => (
-                                             <li key={i} className="bg-gray-50 border border-gray-200 p-3 flex items-start gap-3">
-                                                 <AlertTriangle className="text-red-400 shrink-0 mt-0.5" size={16} />
-                                                 <span>{symptom}</span>
+                                 <div className="prose prose-gray max-w-none text-gray-700">
+                                     <p className="text-lg leading-relaxed">{result.detailed_explanation}</p>
+                                 </div>
+
+                                 {!isHealthy && result.risk_assessment && (
+                                     <div className="mt-6 border border-gray-200 p-4 bg-gray-50 flex flex-col sm:flex-row gap-6 relative overflow-hidden">
+                                         <div className={`absolute top-0 left-0 w-2 h-full ${result.risk_assessment.severity.toLowerCase().includes('high') ? 'bg-[#D9381E]' : (result.risk_assessment.severity.toLowerCase().includes('low') ? 'bg-yellow-400' : 'bg-orange-500')}`}></div>
+                                         
+                                         <div className="flex-1 py-1 px-2">
+                                             <h4 className="text-sm font-bold uppercase tracking-widest text-[#7A4F2A] mb-4 flex items-center gap-2">
+                                                 <Activity size={16} /> Risk Assessment
+                                             </h4>
+                                             
+                                             <div className="grid sm:grid-cols-3 gap-4">
+                                                 <div className="bg-white p-3 border border-gray-200 shadow-sm">
+                                                     <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Severity</span>
+                                                     <span className={`font-bold text-lg ${result.risk_assessment.severity.toLowerCase().includes('high') ? 'text-red-600' : 'text-orange-600'}`}>
+                                                        {result.risk_assessment.severity}
+                                                     </span>
+                                                 </div>
+                                                 <div className="bg-white p-3 border border-gray-200 shadow-sm">
+                                                     <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Spread Potential</span>
+                                                     <span className="font-semibold text-sm text-gray-800">
+                                                        {result.risk_assessment.spread_potential}
+                                                     </span>
+                                                 </div>
+                                                 <div className="bg-white p-3 border border-gray-200 shadow-sm">
+                                                     <span className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Est. Yield Loss</span>
+                                                     <span className="font-semibold text-sm text-gray-800">
+                                                        {result.risk_assessment.estimated_yield_loss}
+                                                     </span>
+                                                 </div>
+                                             </div>
+                                         </div>
+                                     </div>
+                                 )}
+
+                                 {((result.symptoms_observed && result.symptoms_observed.length > 0) || result.environmental_factors?.length || result.affected_areas_description) && !isHealthy && (
+                                    <div className="mt-8 space-y-6">
+                                         {result.symptoms_observed && result.symptoms_observed.length > 0 && (
+                                             <div>
+                                                 <h4 className="text-sm font-bold uppercase tracking-widest text-[#7A4F2A] mb-4">Symptoms Observed</h4>
+                                                 <ul className="grid sm:grid-cols-2 gap-3 text-sm font-medium">
+                                                     {result.symptoms_observed.map((symptom, i) => (
+                                                         <li key={i} className="bg-gray-50 border border-gray-200 p-3 flex items-start gap-3">
+                                                             <AlertTriangle className="text-red-400 shrink-0 mt-0.5" size={16} />
+                                                             <span>{symptom}</span>
+                                                         </li>
+                                                     ))}
+                                                 </ul>
+                                             </div>
+                                         )}
+                                         
+                                         <div className="grid sm:grid-cols-2 gap-6">
+                                             {result.affected_areas_description && (
+                                                 <div>
+                                                     <h4 className="text-xs font-bold uppercase tracking-widest text-[#7A4F2A] mb-3 flex items-center gap-2">
+                                                         <Target size={16} className="text-[#D9381E]" /> Affected Areas
+                                                     </h4>
+                                                     <p className="text-sm text-gray-700 bg-[#FDEDEA] p-4 border border-[#F2C5BE]">
+                                                         {result.affected_areas_description}
+                                                     </p>
+                                                 </div>
+                                             )}
+
+                                             {result.environmental_factors && result.environmental_factors.length > 0 && (
+                                                 <div>
+                                                     <h4 className="text-xs font-bold uppercase tracking-widest text-[#7A4F2A] mb-3 flex items-center gap-2">
+                                                         <CloudRain size={16} className="text-blue-500" /> Environmental Flags
+                                                     </h4>
+                                                     <ul className="text-sm text-gray-700 bg-blue-50 p-4 border border-blue-100 flex flex-col gap-2">
+                                                         {result.environmental_factors.map((factor, i) => (
+                                                             <li key={i} className="flex items-start gap-2">
+                                                                 <span className="text-blue-500 mt-0.5 font-bold">•</span>
+                                                                 <span>{factor}</span>
+                                                             </li>
+                                                         ))}
+                                                     </ul>
+                                                 </div>
+                                             )}
+                                         </div>
+                                    </div>
+                                 )}
+                             </div>
+
+                             {/* Treatment & Prevention */}
+                             {!isHealthy && (
+                                 <div className="grid sm:grid-cols-2 gap-6">
+                                     {/* Treatment */}
+                                     <div className="bg-white border border-gray-200 border-t-4 border-t-[#3FAF47] shadow-sm p-8">
+                                         <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+                                             <ShieldCheck className="text-[#3FAF47]" size={24} /> Treatment Actions
+                                         </h3>
+                                         <ul className="space-y-4">
+                                             {result.treatment_recommendations.map((rec, i) => (
+                                                 <li key={i} className="flex gap-4">
+                                                     <div className="bg-[#3FAF47] text-white w-6 h-6 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                                                         {i + 1}
+                                                     </div>
+                                                     <p className="text-gray-700 leading-relaxed font-medium">{rec}</p>
+                                                 </li>
+                                             ))}
+                                         </ul>
+                                     </div>
+                                     
+                                     {/* Prevention */}
+                                     <div className="bg-white border border-gray-200 border-t-4 border-t-[#7A4F2A] shadow-sm p-8">
+                                         <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+                                             <Sprout className="text-[#7A4F2A]" size={24} /> Preventive Measures
+                                         </h3>
+                                         <ul className="space-y-4">
+                                             {result.preventive_measures.map((prev, i) => (
+                                                 <li key={i} className="flex gap-4">
+                                                     <div className="bg-[#7A4F2A] text-white w-6 h-6 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                                                         {i + 1}
+                                                     </div>
+                                                     <p className="text-gray-700 leading-relaxed font-medium">{prev}</p>
+                                                 </li>
+                                             ))}
+                                         </ul>
+                                     </div>
+                                 </div>
+                             )}
+                             {isHealthy && result.preventive_measures && result.preventive_measures.length > 0 && (
+                                 <div className="bg-white border border-gray-200 border-t-4 border-t-[#3FAF47] shadow-sm p-8">
+                                     <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
+                                         <Sprout className="text-[#3FAF47]" size={24} /> Recommended Maintenance Tips
+                                     </h3>
+                                     <ul className="space-y-4">
+                                         {result.preventive_measures.map((prev, i) => (
+                                             <li key={i} className="flex gap-4">
+                                                 <div className="bg-[#3FAF47] text-white w-6 h-6 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                                                     {i + 1}
+                                                 </div>
+                                                 <p className="text-gray-700 leading-relaxed font-medium">{prev}</p>
                                              </li>
                                          ))}
                                      </ul>
                                  </div>
                              )}
-                             
-                             <div className="grid sm:grid-cols-2 gap-6">
-                                 {analysisResult.affected_areas_description && (
-                                     <div>
-                                         <h4 className="text-xs font-bold uppercase tracking-widest text-[#7A4F2A] mb-3 flex items-center gap-2">
-                                             <Target size={16} className="text-[#D9381E]" /> Affected Areas
-                                         </h4>
-                                         <p className="text-sm text-gray-700 bg-[#FDEDEA] p-4 border border-[#F2C5BE]">
-                                             {analysisResult.affected_areas_description}
-                                         </p>
-                                     </div>
-                                 )}
-
-                                 {analysisResult.environmental_factors && analysisResult.environmental_factors.length > 0 && (
-                                     <div>
-                                         <h4 className="text-xs font-bold uppercase tracking-widest text-[#7A4F2A] mb-3 flex items-center gap-2">
-                                             <CloudRain size={16} className="text-blue-500" /> Environmental Flags
-                                         </h4>
-                                         <ul className="text-sm text-gray-700 bg-blue-50 p-4 border border-blue-100 flex flex-col gap-2">
-                                             {analysisResult.environmental_factors.map((factor, i) => (
-                                                 <li key={i} className="flex items-start gap-2">
-                                                     <span className="text-blue-500 mt-0.5 font-bold">•</span>
-                                                     <span>{factor}</span>
-                                                 </li>
-                                             ))}
-                                         </ul>
-                                     </div>
-                                 )}
-                             </div>
-                        </div>
-                     )}
-                 </div>
-
-                 {/* Treatment & Prevention */}
-                 {!isHealthy && (
-                     <div className="grid sm:grid-cols-2 gap-6">
-                         {/* Treatment */}
-                         <div className="bg-white border border-gray-200 border-t-4 border-t-[#3FAF47] shadow-sm p-8">
-                             <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-                                 <ShieldCheck className="text-[#3FAF47]" size={24} /> Treatment Actions
-                             </h3>
-                             <ul className="space-y-4">
-                                 {analysisResult.treatment_recommendations.map((rec, i) => (
-                                     <li key={i} className="flex gap-4">
-                                         <div className="bg-[#3FAF47] text-white w-6 h-6 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                                             {i + 1}
-                                         </div>
-                                         <p className="text-gray-700 leading-relaxed font-medium">{rec}</p>
-                                     </li>
-                                 ))}
-                             </ul>
                          </div>
-                         
-                         {/* Prevention */}
-                         <div className="bg-white border border-gray-200 border-t-4 border-t-[#7A4F2A] shadow-sm p-8">
-                             <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-                                 <Sprout className="text-[#7A4F2A]" size={24} /> Preventive Measures
-                             </h3>
-                             <ul className="space-y-4">
-                                 {analysisResult.preventive_measures.map((prev, i) => (
-                                     <li key={i} className="flex gap-4">
-                                         <div className="bg-[#7A4F2A] text-white w-6 h-6 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                                             {i + 1}
-                                         </div>
-                                         <p className="text-gray-700 leading-relaxed font-medium">{prev}</p>
-                                     </li>
-                                 ))}
-                             </ul>
-                         </div>
-                     </div>
-                 )}
-                 {isHealthy && analysisResult.preventive_measures && analysisResult.preventive_measures.length > 0 && (
-                     <div className="bg-white border border-gray-200 border-t-4 border-t-[#3FAF47] shadow-sm p-8">
-                         <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-                             <Sprout className="text-[#3FAF47]" size={24} /> Recommended Maintenance Tips
-                         </h3>
-                         <ul className="space-y-4">
-                             {analysisResult.preventive_measures.map((prev, i) => (
-                                 <li key={i} className="flex gap-4">
-                                     <div className="bg-[#3FAF47] text-white w-6 h-6 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                                         {i + 1}
-                                     </div>
-                                     <p className="text-gray-700 leading-relaxed font-medium">{prev}</p>
-                                 </li>
-                             ))}
-                         </ul>
-                     </div>
-                 )}
+                     );
+                 })}
 
                  {/* Feedback Section */}
                  <div className="bg-gray-50 border border-gray-200 shadow-sm p-6 flex flex-col sm:flex-row items-center justify-between gap-4 mt-2">
